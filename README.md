@@ -4,8 +4,8 @@
 
 # DispatchThis
 
-> An IL-level deobfuscator for an **indirect-jump control-flow flattener**, built as a
-> [Binary Ninja](https://binary.ninja/) workflow.
+> Flattened the graph? DispatchThis! An IL-level deobfuscator for an **indirect-jump control-flow flattener**, built as 
+> a [Binary Ninja](https://binary.ninja/) Workflow.
 
 ![status: proof of concept](https://img.shields.io/badge/status-proof--of--concept-yellow)
 ![license: MIT](https://img.shields.io/badge/license-MIT-green)
@@ -13,9 +13,8 @@
 
 > [!WARNING]
 > **Educational Proof of Concept.**
-> Written and tested against a *single* malware family (see below) and **there
-> are bugs**. Treat it as an example of IL-level deobfuscation inside a Binary
-> Ninja workflow. Read [`docs/known-issues.md`](docs/known-issues.md) before relying on any output.
+> Treat it as an example of IL-level deobfuscation inside a Binary
+> Ninja workflow. See [`docs/known-issues.md`](docs/known-issues.md) for additional context.
 > Pull requests are welcome!
 
 ## What it does
@@ -29,12 +28,13 @@ clone of Binary Ninja's `core.function.metaAnalysis` workflow. **No bytes are ev
 patched.**
 
 > [!NOTE]
-> **Why a workflow / IL rewriting?** Operating on the IL is enormously versatile: whole
-> expressions and control-flow edges can be rewritten directly, which eliminates the need
-> to patch assembly - a process that proved incredibly burdensome.
+> **Why a workflow / IL rewriting?** Replacing IL expressions with Binary Ninja Workflows
+is incredibly versatile: whole expressions and control-flow edges, unconditional jumps and conditional expressions
+> are replaced in the IL following state to Original Basic Block resolution, ultimately eliminating
+> the need to patch assembly - a process that can be incredibly burdensome.
 
-For the full obfuscation breakdown (indirect jump gadgets, opaque predicates, the 32-bit-state
-dispatcher, and indirect call gadgets from the sample), see [`docs/obfuscation.md`](docs/obfuscation.md).
+For the full obfuscation breakdown including indirect jumps, opaque predicates, control flow flattening w/ a 32-bit-state
+constant, and indirect call gadgets from the sample, see [`docs/obfuscation.md`](docs/obfuscation.md).
 
 ## See it in action
 
