@@ -4,7 +4,7 @@
 
 # DispatchThis
 
-> Flattened the graph? DispatchThis! An IL-level deobfuscator for an **indirect-jump control-flow flattener**, built as 
+> Flattened the graph? DispatchThis! An IL-level deobfuscator for an **indirect jump + indirect call + control flow flattener**, built as 
 > a [Binary Ninja](https://binary.ninja/) Workflow.
 
 ![status: proof of concept](https://img.shields.io/badge/status-proof--of--concept-yellow)
