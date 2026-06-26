@@ -15,21 +15,11 @@ Binary Ninja version**. The list below is non-exhaustive - expect rough edges.
   and often serve as jump targets for gadgets referenced by named functions (e.g., chromium_extract).
   As the control-flow graphs for named functions expand, many of these auto-generated functions are
   removed automatically by calling `bv.remove_user_function`.
-- **Slow with larger functions.** Larger functions take some time to handle.
-
-## Indirect calls
-
-- **Some decode variants don't fold.** `resolve_call_target` handles the common
-  spilled-variable and call-through-slot forms, but other decode variants are not covered.
-  When a call can't be folded it is left indirect, and because no prototype is pinned its
-  arguments may render as `/* nop */` in HLIL or Pseudo-code.
 
 ## Cleanup residue
 
-- **Dead decode chains can survive.** Fully dead chains that end in a `var = var` copy pass
-  the cleanup's escape check and are left in place. They are harmless (genuinely dead) but
-  visible in the output. The escape check is deliberately conservative - it would rather
-  leave dead residue than risk NOPing a live value.
+- **Globals can survive.** Call-decode gadgets are not cleaned up fully and associated
+  global variables get left behind in the cleanup pass.
 
 ## Conditional reconstruction
 
@@ -42,14 +32,10 @@ Binary Ninja version**. The list below is non-exhaustive - expect rough edges.
 
 - **No plugin hot-reload.** Binary Ninja runs the Python at startup; editing any file
   requires a **full restart**, not just a reanalysis.
-- **Reanalyze to apply toggles.** Enabling or disabling a pass only takes effect on the
-  next reanalysis (the menu items say so).
 - **Verbose logging.** The passes log heavily (per-jump / per-link detail) to make misses
-  visible. This is useful while iterating but noisy; it has not been dialled back to a
-  summary.
-- **Cost.** Flattened functions are large and the LLIL resolver iterates to a fixpoint, so
-  analysis can take many passes. The plugin raises Binary Ninja's analysis limits to
-  accommodate this.
+  visible. This is useful while debugging but noisy - it is advised to set Binary Ninja's
+  log-level appropriately.
+- **Slow with larger functions.** Larger functions take some time to handle.
 
 ## Reporting
 
