@@ -5,18 +5,44 @@ own activities into it. Everything is IL expression rewriting - no bytes are pat
 
 ## Registration and ordering
 
-From `__init__.py` / `workflow.py`, four activities are inserted:
+From `__init__.py` / `workflow.py`, four working activities are inserted:
 
-| Activity ID | Stage | Inserted before |
-| --- | --- | --- |
-| `extension.DispatchThis.IndirectPatcher` | LLIL | `core.function.generateMediumLevelIL` |
-| `extension.DispatchThis.IndirectCallPatcher` | MLIL | `core.function.generateHighLevelIL` |
-| `extension.DispatchThis.Deflattener` | MLIL | `core.function.generateHighLevelIL` |
-| `extension.DispatchThis.Cleanup` | MLIL | `core.function.generateHighLevelIL` |
+| Activity ID | Stage | Inserted before | Runs for |
+| --- | --- | --- | --- |
+| `extension.DispatchThis.IndirectPatcher` | LLIL | `core.function.generateMediumLevelIL` | `INDIRECT_JUMP_CALL` or `OLLVM_INDIRECT_32` |
+| `extension.DispatchThis.IndirectCallPatcher` | MLIL | `core.function.generateHighLevelIL` | `INDIRECT_JUMP_CALL` or `OLLVM_INDIRECT_32` |
+| `extension.DispatchThis.Deflatten` | MLIL | `core.function.generateHighLevelIL` | `OLLVM_INDIRECT_32` or `OLLVM_XOR_64` |
+| `extension.DispatchThis.Cleanup` | MLIL | `core.function.generateHighLevelIL` | `OLLVM_INDIRECT_32` |
 
-The indirect-jump resolver runs **before MLIL is generated**, because the deflattener needs
-the flattened CFG to exist (the indirect jumps resolved to real edges) before MLIL analysis.
-The other three run before HLIL generation, in the order call-resolve → deflatten → cleanup.
+The indirect-jump resolver runs **before MLIL is generated**, because a shape that depends
+on it needs the CFG already reconnected (the indirect jumps resolved to real edges) before
+MLIL analysis. The other three run before HLIL generation, in the order call-resolve →
+deflatten → cleanup.
+
+## The toggles
+
+Three further activities are registered that carry **no action** at all:
+
+| Activity / setting ID | Shown as |
+| --- | --- |
+| `analysis.plugins.dispatchThis.indirectJumpsCalls` | `INDIRECT_JUMP_CALL` |
+| `analysis.plugins.dispatchThis.deflatten` | `OLLVM_INDIRECT_32` |
+| `analysis.plugins.dispatchThis.ollvmXor64` | `OLLVM_XOR_64` |
+
+They exist because an activity name doubles as a per-function setting identifier: Binary
+Ninja's `eligibility.auto` generates a Function Analysis toggle whose ID is the activity
+name. Declaring them with `{"auto": {"default": False}}` is what surfaces the checkboxes,
+and the working activities above then reference those IDs in their own `eligibility`
+predicates. Everything defaults to off, so the plugin stays inert until something is
+enabled on a function.
+
+The identifiers are the ones the plugin used under the older **Indirect Jumps/Calls** and
+**Deflatten** labels, so an existing database keeps whatever was set on its functions.
+
+`MODES` in `shapes/base.py` lists the two flattener modes in precedence order, consulted
+when resolving which one is active; if several are somehow enabled, the earliest wins.
+`INDIRECT_JUMP_CALL` is deliberately **not** in that list - it selects no shape, so mode
+resolution must never land on it.
 
 ## The activities
 
@@ -50,11 +76,17 @@ and no prototype, so HLIL would render arguments as `/* nop */`. The pass fixes 
 > would loop analysis forever, so it is applied **at most once per call site per session**,
 > tracked in `dispatchthis_call_types_set`.
 
-### 3. Deflattener (MLIL, opt-in) - `passes/medium/deflatten.py`
+### 3. Deflattener (MLIL) - `workflow.py` → a shape solver
 
-Gated behind the `Enable Deflattening` setting, and only runs once the LLIL stage has
-drained every indirect jump (otherwise the CFG - and the recovered state machine - would be
-incomplete).
+**One activity, one per shape solver behind it.** The callback resolves the mode enabled on
+the function, looks the solver up with `shapes.for_mode`, and dispatches. The two pipelines
+have nothing in common beyond producing a deflattened function, so the callback branches
+once, at the top, on `shape.uses_legacy_pipeline`. See [`shapes.md`](shapes.md).
+
+**`OLLVM_INDIRECT_32`** runs the original sequence, which predates the shape framework and
+still lives in `utils/state_machine.py` and `passes/medium/deflatten.py`. It only proceeds
+once the LLIL stage has drained every indirect jump - otherwise the CFG, and the recovered
+state machine, would be incomplete.
 
 - `StateMachine(bv, func).analyze()` (`utils/state_machine.py`) recovers the state
   variable, the backbone `{state_value -> comparator block}`, and each OBB's real
@@ -66,10 +98,30 @@ incomplete).
 - The resolved dispatcher state values and the state variable's alias set are recorded to
   `session_data` so the cleanup can NOP the state writes precisely (by value and by var).
 
-### 4. Cleanup / NOP pass (MLIL, opt-in) - `passes/medium/nop_pass.py`
+**`OLLVM_XOR_64`** hands the whole job to its shape module, `shapes/xor_split64.py`, via
+the `solve` → `apply` contract. It has no LLIL prerequisite, because the jumps in that
+shape are already direct. It has a prerequisite of its own, though: a flattened body in
+this shape usually arrives split across several overlapping functions, so `solve` may
+undefine the fragments the body falls into, request reanalysis, and return an empty result
+to be re-entered once the merged body settles. Details in
+[`obfuscation-xor64.md`](obfuscation-xor64.md#how-it-is-solved).
 
-Gated behind `Enable Cleanup` **and** `Enable Deflattening`; it only acts once deflatten has
-rewritten the OBB exits this pass. `clean_resolved_gadget_jumps` then, to a fixpoint:
+Before rewriting, the callback records the solved state values and
+`result.state_write_vars` to `session_data` for every shape, so the keys below mean the
+same thing whichever solver produced them.
+
+### 4. Cleanup / NOP pass (MLIL) - `passes/medium/nop_pass.py`
+
+**`OLLVM_INDIRECT_32` only.** It identifies gadgets by *signature*, which includes reading
+any constant wider than 32 bits as a decode key - and every state constant in
+`OLLVM_XOR_64` is 64-bit, so running it there would NOP real code. That shape has no
+cleanup of its own either, so its dead state writes survive.
+
+It acts only once deflatten has rewritten the OBB exits in this pass, which the deflatten
+callback signals by setting `dispatchthis_mlil_stable` - and it sets that **only** for a
+shape whose `uses_gadget_cleanup` is true, which is what keeps this pass off the other
+shape in practice as well as by eligibility. `clean_resolved_gadget_jumps` then, to a
+fixpoint:
 
 - converts every single-target `MLIL_JUMP_TO` into a `goto`;
 - collapses each always-true opaque predicate (its condition reads a gadget-tainted
@@ -94,7 +146,7 @@ Deflatten runs before cleanup so that cleanup sees the gotos and leaves the
 | --- | --- |
 | `dispatchthis_llil_stable` | `{start: bool}` - LLIL indirect jumps fully resolved |
 | `dispatchthis_gadget_map` | `{start: {jump_addr: target}}` - resolved jump targets |
-| `dispatchthis_mlil_stable` | `{start: bool}` - deflatten has rewritten exits |
+| `dispatchthis_mlil_stable` | `{start: bool}` - deflatten has rewritten exits; **set only for a shape with `uses_gadget_cleanup`**, since it is what releases the cleanup activity |
 | `dispatchthis_state_consts` | `{start: set(state_value)}` - for state-write NOP |
 | `dispatchthis_state_vars` | `{start: set(var)}` - state var + aliases |
 | `dispatchthis_call_types_set` | `{start: set(call_addr)}` - once-guard for type adjust |

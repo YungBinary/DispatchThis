@@ -109,6 +109,11 @@ def _prolog_region(mlil):
                 return region  # stop at the dispatcher; don't cross into the OBBs
             if succ.start not in region:
                 queue.append(succ)
+    # A lookalike function may have no recognised relational dispatcher. Return
+    # the region we did discover instead of leaking ``None`` into membership
+    # tests in ``compute_redirections``. The caller will simply produce no
+    # dispatcher exits for blocks outside this entry-reachable region.
+    return region
 
 
 def find_chain_exit_jump_instr(mlil, bb, gadget_map):

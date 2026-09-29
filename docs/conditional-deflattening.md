@@ -1,5 +1,12 @@
 # Conditional deflattening (the Z3 path)
 
+> [!NOTE]
+> This is the `OLLVM_INDIRECT_32` path, and the only one that uses Z3. `OLLVM_XOR_64`
+> reconstructs its conditional transitions structurally instead - a `cmov` selects one
+> half of the split state, so the two candidate successors follow from the XOR without
+> anything to solve. See
+> [`obfuscation-xor64.md`](obfuscation-xor64.md#4-enumerate-regions-and-plan-the-rewrites).
+
 Most flattened transitions are **unconditional**: an OBB sets the state variable to a
 single constant and jumps to the dispatcher, which routes it to one successor. Those are
 handled directly - the dispatcher exit jump is rewritten into a `goto` to the real
@@ -45,7 +52,7 @@ symbolically rather than pattern-matched, which keeps the handling correct acros
 
 A fully annotated example - disassembly, the recovered conditions, and the resulting
 control flow - lives alongside the code at
-[`../passes/medium/REFERENCE_conditional_obb.md`](../passes/medium/REFERENCE_conditional_obb.md)
+[`plugins/DispatchThis/passes/medium/REFERENCE_conditional_obb.md`](../plugins/DispatchThis/passes/medium/REFERENCE_conditional_obb.md)
 (canonical block `0x140082b3e` in `detect_browsers` @ `0x14006f570`).
 
 ## Status

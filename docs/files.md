@@ -2,13 +2,26 @@
 
 ```
 DispatchThis/
-├── __init__.py                 Plugin entry point: registers the workflow + activities,
-│                               the settings, the analysis-limit overrides, and the
-│                               Plugins-menu Enable/Disable toggles.
+├── __init__.py                 Plugin entry point: registers the workflow, the three
+│                               per-function toggles, the four working activities and
+│                               their eligibility, and the analysis-limit overrides.
 ├── workflow.py                 The four workflow activity callbacks (LLIL jump resolve,
-│                               MLIL call resolve, deflatten, cleanup) and their gating.
+│                               MLIL call resolve, deflatten, cleanup), their gating,
+│                               and the mode -> shape dispatch inside deflatten.
+├── shapes/
+│   ├── base.py                 The shape contract: FlattenerShape, ShapeResult, and the
+│   │                           mode / setting identifiers.
+│   ├── __init__.py             Mode -> solver registry (register / for_mode / registered).
+│   ├── forti_gadget.py         OLLVM_INDIRECT_32 descriptor. Holds no solving logic: that
+│   │                           shape's pipeline predates the framework and runs as it was.
+│   └── xor_split64.py          OLLVM_XOR_64, self-contained: dispatcher discovery, fragment
+│                               absorption, compare-base resolution, region planning, and
+│                               the rewrites.
 ├── utils/
 │   ├── log.py                  Shared "DispatchThis" logger.
+│   ├── const_eval.py           Constant evaluation and parameter binding: eval_consts,
+│   │                           bind_bases_from_callers, solve_base_by_voting,
+│   │                           split_base_disp.
 │   └── state_machine.py        StateMachine: recovers the state variable, the backbone
 │                               map {state -> comparator block}, and OBB -> successor links.
 ├── passes/
@@ -23,22 +36,50 @@ DispatchThis/
 │       │                       removal, and precise state-write NOPing.
 │       └── REFERENCE_conditional_obb.md   Annotated reference example for the
 │                                          conditional transition handling.
-├── assets/                     README screenshots.
-├── docs/                       This documentation.
+├── docs/                       This documentation (incl. assets/, the screenshots).
 ├── README.md
 └── LICENSE
 ```
 
+Everything under `passes/`, plus `utils/state_machine.py`, belongs to
+`OLLVM_INDIRECT_32`. `shapes/xor_split64.py` shares none of it - only `utils/`'s logger
+and `const_eval`.
+
 ## Module responsibilities
 
 ### `__init__.py`
-Clones `core.function.metaAnalysis`, registers the four activities and their insertion
-points, registers the boolean setting (`dispatchthis.enableDeflatten`, raises analysis limits, and wires up the `Enable`/`Disable` menu pair for each pass.
+Clones `core.function.metaAnalysis`; registers the three action-free toggle activities
+(`INDIRECT_JUMP_CALL`, `OLLVM_INDIRECT_32`, `OLLVM_XOR_64`) whose names double as the
+per-function setting IDs, then the four working activities with the eligibility predicates
+that map modes to passes, plus their insertion points; and raises the analysis limits.
 
 ### `workflow.py`
 The activity callbacks invoked by the workflow per function. Each is thin: it reads the
-relevant IL off the `AnalysisContext`, calls into a pass module, and manages the
-`session_data` gating (LLIL stability, MLIL stability, recorded state constants/vars).
+relevant IL off the `AnalysisContext`, calls into a pass module or a shape solver, and
+manages the `session_data` gating (LLIL stability, MLIL stability, recorded state
+constants/vars). The deflatten callback additionally resolves which mode is enabled and
+dispatches to that shape - the one place the two pipelines meet.
+
+### `shapes/`
+The shape framework: the contract in `base.py`, the registry in `__init__.py`, and one
+module per supported flattener. `for_mode` is how `workflow.py` reaches a solver.
+Registering a new shape is the whole cost of supporting a new flattener - see
+[`shapes.md`](shapes.md).
+
+### `shapes/xor_split64.py`
+The `OLLVM_XOR_64` solver, and the only shape written against the framework. Finds the
+dispatcher from its 64-bit XOR, undefines the fragments the body falls into so the compare
+tree is whole, resolves the caller-supplied compare bases, enumerates each OBB's forward
+region, and plans one rewrite per region (direct `goto`, private cmov diamond, or a lifted
+branch on the region's own tail). See
+[`obfuscation-xor64.md`](obfuscation-xor64.md#how-it-is-solved).
+
+### `utils/const_eval.py`
+Shared constant machinery. `eval_consts` folds an expression to the set of constants it
+can take within a scope; `split_base_disp` splits a compare value into
+`(parameter, displacement)`; `bind_bases_from_callers` reads a function's call sites
+(including tail calls) to bind its symbolic parameters; `solve_base_by_voting` recovers a
+base the callers do not pin down by scoring candidates against already-known states.
 
 ### `utils/state_machine.py`
 Read-only analysis. `StateMachine.analyze()` finds the state variable (the variable in the
@@ -66,4 +107,5 @@ unconditional and conditional (cmov-selected) transitions; see
 ### `passes/medium/nop_pass.py`
 `clean_resolved_gadget_jumps` runs after the deflattener: converts remaining single-target
 jumps to gotos, collapses always-true opaque predicates, and NOPs the gadget taint set,
-dead decode residue, and state writes - all to a fixpoint, pure IL only.
+dead decode residue, and state writes - all to a fixpoint, pure IL only. Signature-driven,
+which is why it is `OLLVM_INDIRECT_32` only.
