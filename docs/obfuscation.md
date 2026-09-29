@@ -1,8 +1,15 @@
-# The obfuscation
+# The obfuscation: `OLLVM_INDIRECT_32`
 
-This document describes the control-flow flattening scheme that DispatchThis
-targets. All the run-time addresses and constants below are from the sample
-(`FortiEndpoint_Patch.exe`), function `0x140088ad0` (`reg_read_str`).
+This document describes the **first** of the two control-flow flattening schemes
+DispatchThis targets: a 32-bit dispatcher state with original blocks chained by
+decode-gadget indirect jumps. All the run-time addresses and constants below are
+from the sample (`FortiEndpoint_Patch.exe`), function `0x140088ad0`
+(`reg_read_str`).
+
+For the other shape - a 64-bit state split across a register pair and recombined
+with XOR, with no gadgets at all - see
+[`obfuscation-xor64.md`](obfuscation-xor64.md). For why they get separate solvers
+rather than one parameterised one, see [`shapes.md`](shapes.md).
 
 ## High-level shape
 
